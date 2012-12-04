@@ -56,6 +56,10 @@ public class Product3DOnView extends View {
 	int _parentWidth;
 	int _parentHeight;
 
+    //bitmap width X height
+    int _bmpWidth;
+    int _bmpHeight;
+
 	// variables about max number of images, image index and the bitmap matrix
 	// number of images required for 3D view of each product
 	final static int MaxNumImg = 36;
@@ -92,7 +96,7 @@ public class Product3DOnView extends View {
 	public Angle360View _angle360View;
 
 	// for scaling
-	public float _scaleFactor = 0.8f;
+	public float _scaleFactor = 1.0f;
 	private float _scaleFactorMax = 1.0f;
 	private float _scaleFactorMin = 0.7f;
 	private ScaleGestureDetector _scaleDetector;
@@ -332,10 +336,17 @@ public class Product3DOnView extends View {
 
 		canvas.save();
 		canvas.scale(_scaleFactor, _scaleFactor);
-		canvas.translate(-canvas.getWidth() * (_scaleFactor - 1) / 2, -canvas.getHeight()
-				* (_scaleFactor - 1) / 2);
+
+        System.out.println("factor| Canvas width X Canvs height: " + _scaleFactor + "|" + canvas.getWidth() + "X" + canvas.getHeight());
+        System.out.println("parent width x height: " + _parentWidth + "X" + _parentHeight);
+//        canvas.translate(-canvas.getWidth() * (_scaleFactor - 1) / 2, -canvas.getHeight()
+//				* (_scaleFactor - 1) / 2);
+
+        canvas.translate(-canvas.getWidth() * (1 - 1.0f/_scaleFactor) / 2, -canvas.getHeight()
+                * (1 - 1.0f/_scaleFactor) / 2);
 
 		_paint.setColor(Color.RED);
+        _paint.setStyle(Paint.Style.STROKE);
 
 
 		if (_imagesetBitmaps[_curShowingImage % _numImgs] != null) {
@@ -346,6 +357,9 @@ public class Product3DOnView extends View {
 			canvas.drawBitmap(_imagesetBitmaps[_curShowingImage % _numImgs], startX, startY, null);
 			updateOthers(_curShowingImage % _numImgs);
 
+            canvas.drawRect(startX, startY, startX+_bmpWidth, startY+_bmpHeight, _paint);
+            canvas.drawLine(_parentWidth/2, 0, _parentWidth/2, _parentHeight, _paint);
+            canvas.drawLine(0, _parentHeight/2, _parentWidth, _parentHeight/2, _paint);
 			//draw callout dots
 			for (Pair<Point, String> p : _callouts) {
 				canvas.drawCircle(startX + p.first.x * _scaleImageReading / _sampleSize,
@@ -358,8 +372,8 @@ public class Product3DOnView extends View {
 			//System.out.println("chosen callout index: " + _chosenCalloutIndex);
 			if (_callouts.size() > 0 && _chosenCalloutIndex >= 0) {
 
-				//_paint.setStyle(Paint.Style.STROKE);
-				//canvas.drawRect(0, 0, _parentWidth, _parentHeight, _paint);
+				_paint.setStyle(Paint.Style.STROKE);
+				canvas.drawRect(0, 0, _parentWidth, _parentHeight, _paint);
 
 //				Rect bounds = new Rect();
 //				canvas.drawText(_callouts.get(_chosenCalloutIndex).second, _parentWidth-150, 50, _paint);
@@ -468,13 +482,13 @@ public class Product3DOnView extends View {
 				}
 
 				Bitmap orgbmp = BitmapFactory.decodeStream(tmpStream, null, opts);
-				int bmpWidth = orgbmp.getWidth();
-				int bmpHeight = orgbmp.getHeight();
+				_bmpWidth = orgbmp.getWidth();
+				_bmpHeight = orgbmp.getHeight();
 
-				Log.i("imageset image size", bmpWidth + "x" + bmpHeight);
+				Log.i("imageset image size", _bmpWidth + "x" + _bmpHeight);
 				Log.i("parent canvas size", _parentWidth + "x" + _parentHeight);
 
-				_scaleFactorMax = Math.min(_parentWidth*1.0f/bmpWidth, _parentHeight*1.0f/bmpHeight) - 0.15f;
+				_scaleFactorMax = Math.min(_parentWidth*1.0f/_bmpWidth, _parentHeight*1.0f/_bmpHeight) - 0.15f;
 
 				// I don't want to scale now, I want to use the maximum possible information here
 				// fix the scale, no scaling at beginning
@@ -484,7 +498,7 @@ public class Product3DOnView extends View {
 				Matrix scaleMatrix = new Matrix();
 				scaleMatrix.postScale(scale, scale);
 
-				_imagesetBitmaps[i] = Bitmap.createBitmap(orgbmp, 0, 0, bmpWidth, bmpHeight, scaleMatrix, false);
+				_imagesetBitmaps[i] = Bitmap.createBitmap(orgbmp, 0, 0, _bmpWidth, _bmpHeight, scaleMatrix, false);
 				_ifLoadedImages[i] = true;
 				orgbmp.recycle();
 
