@@ -39,23 +39,24 @@ import java.util.TimerTask;
 public class Product3DOnView extends View {
 
 	// main variables about product itself, but not used till now
-	private int _productIndex;
-	private String _productName;
+//	private int _productIndex;
+//	private String _productName;
 
-	private String _imageset;
-	private ArrayList<String> _imagesetFilenames;
+	private String _imagesetName;   //name of image set (note that, one product may have multiple image sets)
+	private ArrayList<String> _imagesetFilenameList;    //file names only, need imagesetName together to read file
 
-	private int _sampleSize;
-	private float _scaleImageReading;
+	private int     _sampleSize;    //samplesize >=1 integer, 2 means down sample with half information
+	private float _scaleImageReading;   //why do we need this? Todo: should we set it as 1.0f?
 
+    //database is in _g
 	private Globals _g;
-	private SQLiteDatabase _db;
-	//DBUtils.getStaticDb();
+	//private SQLiteDatabase _db;
 
+    //parentWidthxheight is much bigger than _bmpWidthxheight,
+    //parentWidthxheight is slightly bigger than canvasWidthxheight
 	// parent width and height
 	int _parentWidth;
 	int _parentHeight;
-
     //bitmap width X height
     int _bmpWidth;
     int _bmpHeight;
@@ -70,10 +71,9 @@ public class Product3DOnView extends View {
 	Bitmap[] _imagesetBitmaps = new Bitmap[MaxNumImg];
 	boolean[] _ifLoadedImages = new boolean[MaxNumImg];
 
-	// set the init value as a big value to avoid negative integer checking for
-	// it
-	// reset this value for every imageset reloading
-	public int _curShowingImage = 72000000;
+	//Since the _curShowingImage is controlled by degree indicator, the initial value doesn't matter at all
+	public int _curShowingImage = 0;
+    //used to decide refreshing canvas and callout queries
 	int _lastShowedImage = -1;
 
 	// stored X/Y for temporary use
@@ -81,11 +81,12 @@ public class Product3DOnView extends View {
 	float _lastY = 0;
 
 	// variable for blocking response to mouse moving
-	boolean _ifBlockingMouseMove = false;
 	boolean _ifTouching = false;
+
+    //used by angle indicator, Todo: should be changed to method
 	public boolean _ifAngleIndTouching = false;
 
-	//Four boolean variables 
+	//Four boolean variables planned for animation control
 	boolean _ifDrawingCalloutExtAnimation = false;
 	boolean _ifDrawingCalloutDotAnimation = false;
 	boolean _ifDrawingCalloutZoomIn = false;
@@ -95,27 +96,30 @@ public class Product3DOnView extends View {
 	public ProgressBar _progressBar;
 	public Angle360View _angle360View;
 
-	// for scaling
+	// for scaling, no benefit to get higher scale ratio, so maximum is 1.0f
 	public float _scaleFactor = 1.0f;
 	private float _scaleFactorMax = 1.0f;
-	private float _scaleFactorMin = 0.7f;
-	private ScaleGestureDetector _scaleDetector;
+    //Todo: we may need to smartly decide min factor
+	private float _scaleFactorMin = 0.8f;
 
+    //everything about callout operation
 	private Timer _calloutQueryTimer = new Timer();
+    float _calloutRadius = 10.0f;
+
 	private DBQueryTimerTask _calloutQueryTimerTask = null;
 	private ArrayList<Pair<Point, String>> _callouts = new ArrayList<Pair<Point, String>>();
-	private boolean _ifCalloutZoom = false;
-	private int _chosenCalloutIndex = -1;
+    private int _chosenCalloutIndex = -1;
+
+    //zooming indicator & zooming bitmap loaded separately
+    private boolean _ifCalloutZoom = false;
 	private Bitmap _zoomInBitpmap;
 
 	// painter used for drawing...
 	Paint _paint = new Paint();
 
-
     //I'm going to use gradient drawable for the background of callout text
     GradientDrawable _gradientDrawable = new GradientDrawable(
-            GradientDrawable.Orientation.TOP_BOTTOM, new int[] { 0xFF1A476C,
-            0xFF1A354C });
+            GradientDrawable.Orientation.TOP_BOTTOM, new int[] { 0xFF1A476C, 0xFF1A354C });
 
 	/**
 	 * Never used it
@@ -146,22 +150,15 @@ public class Product3DOnView extends View {
 	 */
 	public Product3DOnView(Context context, AttributeSet attrs) {
 		super(context, attrs);
-		//_scaleDetector = new ScaleGestureDetector(context, new ScaleListener());
+
 		if (!isInEditMode())
 			_g = Globals.getInstance(getContext());
-
 
         _gradientDrawable.setShape(GradientDrawable.RECTANGLE);
         _gradientDrawable.setGradientRadius(10.0f);
 
-		//don't load database if in edit mode
-//		if(!isInEditMode())
-//			_db = _g.getDB(getContext());
-
-		// There is always a drawing thread running at background; the benefit
-		// of doing
-		// this is we can update data anytime and notify the UI thread to draw
-		// it in OnDraw()
+        // There is always a drawing thread running at background; the benefit of doing
+        // this is we can update data anytime and notify the UI thread to draw it in OnDraw()
 		new Thread(drawUpdateThread).start();
 	}
 
@@ -170,15 +167,18 @@ public class Product3DOnView extends View {
 	 */
 	private class DBQueryTimerTask extends TimerTask {
 		private String _filename;
+        private String _sqlquery;
 
 		public DBQueryTimerTask(String filename) {
 			_filename = filename;
+
+            //sql query
+            _sqlquery = String.format("SELECT x, y, note FROM imagecallouts where filename='%s'", _filename);
 		}
 
 		@Override
 		public void run() {
-			Cursor cursor = _g.getDB().rawQuery(String.format("SELECT x, y, note FROM imagecallouts where filename='%s'",
-					_filename), null);
+			Cursor cursor = _g.getDB().rawQuery(_sqlquery, null);
 
 			// start to read data
 			cursor.moveToFirst();
@@ -194,49 +194,47 @@ public class Product3DOnView extends View {
 				y = cursor.getInt(1);
 				note = cursor.getString(2);
 
-				//System.out.println(x + " " + y + " "+ note);
 				//There can be only one timertask running one time, so we don't need vector
 				_callouts.add(new Pair<Point, String>(new Point(x, y), note));
 				cursor.moveToNext();
 			}
+            cursor.close();
+
 			// safe to inform the draw thread to redraw
-			System.out.println("---callout query finished");
+			Log.i("callout", "callout query finished");
 			postInvalidate();
 		}
 	}
 
 
-	/**
+/*	*//**
 	 * Set the number of images
 	 * Reset the progress bar maximum value
 	 *
-	 * @param imageNum
-	 */
+	 *//*
 	public void resetView(int imageNum) {
 		_numImgs = imageNum;
 		_progressBar.setMax(_numImgs);
 
-	}
+	}*/
 
 	public void zoomIn() {
 		_scaleFactor = Math.min(_scaleFactor+0.01f, _scaleFactorMax);
-		System.out.println("scaleFactor vs _scaleFactorMax" + _scaleFactor + " " + _scaleFactorMax);
-
-		updateCanvas();
+        postInvalidate();
 	}
 
 	public void zoomOut() {
 		_scaleFactor = Math.max(_scaleFactor-0.01f, _scaleFactorMin);
-		updateCanvas();
+        postInvalidate();
 	}
 
-	public void updateCanvas() {
+	/*public void updateCanvas() {
 		//Log.i("updateCanvas", "image index " + _curShowingImage + " scalefactor " + _scaleFactor);
 
 		//Here I set calloutindex as -1 to intentionally hide callout
 		//_chosenCalloutIndex = -1;
 		postInvalidate();
-	}
+	}*/
 
 	/*
 	 * (non-Javadoc)
@@ -263,7 +261,6 @@ public class Product3DOnView extends View {
 		public void run() {
 			while (true) {
 				try {
-					//System.out.println("lastshowedImage" + _lastShowedImage  + "Current index" + _curShowingImage%_numImgs);
 					// I only want the canvas to redraw if there is difference
 					if (_lastShowedImage != _curShowingImage % _numImgs) {
 						_callouts.clear();
@@ -277,8 +274,8 @@ public class Product3DOnView extends View {
 						}
 
 						//imageset filenames should not be null
-						if (_imagesetFilenames != null) {
-							_calloutQueryTimerTask = new DBQueryTimerTask(_imagesetFilenames.get(_curShowingImage % _numImgs));
+						if (_imagesetFilenameList != null) {
+							_calloutQueryTimerTask = new DBQueryTimerTask(_imagesetFilenameList.get(_curShowingImage % _numImgs));
 							_calloutQueryTimer.schedule(_calloutQueryTimerTask, 1000);
 						}
 						_lastShowedImage = _curShowingImage % _numImgs;
@@ -291,20 +288,6 @@ public class Product3DOnView extends View {
 		}
 	};
 
-	public void setProductIndex(int index) {
-
-	}
-
-	// We shouldn't need this function, number-of-images doesn't make any sense
-	// for function
-	// parameters
-	// public void startLoadImages(int num) {
-	// Log.i("testbar", mProgressBar + "");
-	// Log.i("testbar", R.id.Images3DLoadingProgressbar + "");
-	// resetView(num);
-	// LoadImagesTask loadTask = new LoadImagesTask();
-	// loadTask.execute();
-	// }
 
 	/**
 	 * Main function exposed to others to call for loading image sets
@@ -313,18 +296,21 @@ public class Product3DOnView extends View {
 	 * @param filenames : a filename list stored the product shot in order
 	 */
 	public void startLoadImages(String imageSet, ArrayList<String> filenames) {
-		_imageset = imageSet;
-		_imagesetFilenames = filenames;
+		_imagesetName = imageSet;
+		_imagesetFilenameList = filenames;
 
         _curShowingImage = 0;
 		_chosenCalloutIndex = -1;
 
-		//System.out.println(imageSet);
+        _numImgs = filenames.size();
+        _progressBar.setMax(_numImgs);
 
-		resetView(filenames.size());
+        //load image task, current still slow, think about how to optimize speed
 		LoadImagesTask loadTask = new LoadImagesTask();
 		loadTask.execute();
 	}
+
+    Rect tmpbounds = new Rect();
 
 	/* (non-Javadoc)
 	 * @see android.view.View#onDraw(android.graphics.Canvas)
@@ -334,16 +320,19 @@ public class Product3DOnView extends View {
 	protected void onDraw(Canvas canvas) {
 		super.onDraw(canvas);
 
+        //canvas.save|restore will discard translate, rotate operations, but drawing are still there
+
 		canvas.save();
+
+        //scale canvas and center it
 		canvas.scale(_scaleFactor, _scaleFactor);
+        canvas.translate(-canvas.getWidth() * (1 - 1.0f/_scaleFactor) / 2, -canvas.getHeight()
+                * (1 - 1.0f/_scaleFactor) / 2);
+/*
 
         System.out.println("factor| Canvas width X Canvs height: " + _scaleFactor + "|" + canvas.getWidth() + "X" + canvas.getHeight());
         System.out.println("parent width x height: " + _parentWidth + "X" + _parentHeight);
-//        canvas.translate(-canvas.getWidth() * (_scaleFactor - 1) / 2, -canvas.getHeight()
-//				* (_scaleFactor - 1) / 2);
-
-        canvas.translate(-canvas.getWidth() * (1 - 1.0f/_scaleFactor) / 2, -canvas.getHeight()
-                * (1 - 1.0f/_scaleFactor) / 2);
+*/
 
 		_paint.setColor(Color.RED);
         _paint.setStyle(Paint.Style.STROKE);
@@ -355,48 +344,50 @@ public class Product3DOnView extends View {
 
 			//draw bitmap
 			canvas.drawBitmap(_imagesetBitmaps[_curShowingImage % _numImgs], startX, startY, null);
+            //draw callout dots; no need to consider callout is loaded or not
+            for (Pair<Point, String> p : _callouts) {
+                canvas.drawCircle(startX + p.first.x * _scaleImageReading / _sampleSize,
+                        startY + p.first.y * _scaleImageReading / _sampleSize, _calloutRadius, _paint);
+            }
+
+            //notify other widget
 			updateOthers(_curShowingImage % _numImgs);
-
-            canvas.drawRect(startX, startY, startX+_bmpWidth, startY+_bmpHeight, _paint);
+            /*canvas.drawRect(startX, startY, startX+_bmpWidth, startY+_bmpHeight, _paint);
             canvas.drawLine(_parentWidth/2, 0, _parentWidth/2, _parentHeight, _paint);
-            canvas.drawLine(0, _parentHeight/2, _parentWidth, _parentHeight/2, _paint);
-			//draw callout dots
-			for (Pair<Point, String> p : _callouts) {
-				canvas.drawCircle(startX + p.first.x * _scaleImageReading / _sampleSize,
-						startY + p.first.y * _scaleImageReading / _sampleSize, 10.0f, _paint);
-			}
+            canvas.drawLine(0, _parentHeight/2, _parentWidth, _parentHeight/2, _paint);*/
+            canvas.drawRect(0, 0, _parentWidth, _parentHeight, _paint);
 
-
+            //callout text
 			_paint.setTextSize(15 / _scaleFactor);
 			_paint.setAntiAlias(true);
-			//System.out.println("chosen callout index: " + _chosenCalloutIndex);
+
+            Log.i("callout", "Chosed callout index: " + _chosenCalloutIndex);
+
 			if (_callouts.size() > 0 && _chosenCalloutIndex >= 0) {
 
-				_paint.setStyle(Paint.Style.STROKE);
-				canvas.drawRect(0, 0, _parentWidth, _parentHeight, _paint);
+				//_paint.setStyle(Paint.Style.STROKE);
 
-//				Rect bounds = new Rect();
-//				canvas.drawText(_callouts.get(_chosenCalloutIndex).second, _parentWidth-150, 50, _paint);
-//				//canvas.drawLine(_parentWidth/2, _parentHeight/2, _parentWidth-150, 50, _paint);
-//				_paint.getTextBounds(_callouts.get(_chosenCalloutIndex).second, 0, 
-//						_callouts.get(_chosenCalloutIndex).second.length(), bounds);
-//				
-//				System.out.println("text bounds..." + bounds);
 
 				//callout text processing
-				String text = _callouts.get(_chosenCalloutIndex).second;
+				String text = _callouts.get(_chosenCalloutIndex).second.trim();
 				String textLines[] = text.split("-");
+                //Log.i("callout", textLines);
+                System.out.println("callout " + textLines.length);
+
 				//System.out.println("fulltext:" + text);
 				//System.out.println("alllines:" + textLines);
 
 				float maxWidth = 0;
 				float maxHeight = 0;
-				Rect tmpbounds = new Rect();
+
 				for (int i = 0; i < textLines.length; i++) {
 					_paint.getTextBounds(textLines[i], 0, textLines[i].length(), tmpbounds);
 					maxWidth = Math.max(maxWidth, tmpbounds.width());
-					maxHeight += -_paint.ascent() + _paint.descent();
+                    maxHeight += tmpbounds.height();
+					//maxHeight += -_paint.ascent() + _paint.descent();
 				}
+
+                Log.i("callout", "maxwidth, maxheight " + maxWidth + "X" + maxHeight);
 
                 _gradientDrawable.setBounds((int)(_parentWidth - maxWidth - (_scaleFactor - 0.8) * _parentWidth / 2.0f),
                         (int)(10 + (_scaleFactor - 0.8) * _parentHeight / 2.0f + _paint.ascent() -_paint.descent()),
@@ -406,11 +397,20 @@ public class Product3DOnView extends View {
                 _gradientDrawable.setGradientType(GradientDrawable.LINEAR_GRADIENT);
                 _gradientDrawable.draw(canvas);
 
-				_paint.setColor(Color.WHITE);
-				for (int i = 0; i < textLines.length; i++) {
-					canvas.drawText(textLines[i], (float) (_parentWidth - maxWidth - (_scaleFactor - 0.8) * _parentWidth / 2.0f),
+				_paint.setColor(Color.GRAY);
+//				for (int i = 0; i < textLines.length; i++) {
+//					canvas.drawText(textLines[i], (float) (_parentWidth - maxWidth - (_scaleFactor - 0.8) * _parentWidth / 2.0f),
+//							(float) (10 + (-_paint.ascent() + _paint.descent() + 2 / _scaleFactor) * i + (_scaleFactor - 0.8) * _parentHeight / 2.0f), _paint);
+//				}
+//
+                Log.i("callout", "factor: " + _scaleFactor + " font size:  " + 15/_scaleFactor + " extra offset:  " + (_parentWidth - maxWidth - (_scaleFactor-1)*_parentWidth/2.0f));
+
+                for (int i = 0; i < textLines.length; i++) {
+					canvas.drawText(textLines[i], (float) (_parentWidth - maxWidth - (1-1/_scaleFactor)*_parentWidth/2.0f),
 							(float) (10 + (-_paint.ascent() + _paint.descent() + 2 / _scaleFactor) * i + (_scaleFactor - 0.8) * _parentHeight / 2.0f), _paint);
 				}
+
+
 
 				_paint.setColor(Color.BLUE);
 				canvas.drawLine(startX + _callouts.get(_chosenCalloutIndex).first.x * _scaleImageReading / _sampleSize,
@@ -433,18 +433,27 @@ public class Product3DOnView extends View {
 			if (_ifCalloutZoom == true) {
 				System.out.println("Called????");
 
-				canvas.drawBitmap(_zoomInBitpmap, _parentWidth / 2, _parentHeight / 2, null);
+				canvas.drawBitmap(_zoomInBitpmap, _parentWidth / 2  -50, _parentHeight / 2 - 50, null);
+
+                _ifCalloutZoom = false;
 			}
 
 		}
 		canvas.restore();
 	}
 
-	private class LoadZoomInTask extends AsyncTask<String, Integer, String> {
+	private class LoadZoomInTask extends AsyncTask<Integer, Integer, String> {
 
 		@Override
-		protected String doInBackground(String... arg0) {
-			_zoomInBitpmap = Bitmap.createBitmap(_imagesetBitmaps[_curShowingImage % _numImgs], 10, 10, 100, 100);
+		protected String doInBackground(Integer... arg0) {
+            System.out.println("arg0 " + arg0[0]);
+            int index = arg0[0];
+            System.out.println("image size: " + _imagesetBitmaps[_curShowingImage % _numImgs].getWidth() + "X" + _imagesetBitmaps[_curShowingImage % _numImgs].getHeight());
+            _zoomInBitpmap = Bitmap.createBitmap(_imagesetBitmaps[_curShowingImage % _numImgs],
+                    Math.max(_callouts.get(index).first.x/_sampleSize-50, 0),
+                    Math.max(_callouts.get(index).first.y/_sampleSize - 50, 0),
+                    Math.min(100, (int)(_bmpWidth - _callouts.get(index).first.x/_sampleSize) + 50),
+                    Math.min(100, (int)(_bmpHeight- _callouts.get(index).first.y/_sampleSize) + 50));
 
 			_ifCalloutZoom = true;
 			postInvalidate();
@@ -474,9 +483,9 @@ public class Product3DOnView extends View {
 				InputStream tmpStream = null;
 
 				try {
-					System.out.println("loading .." + _imagesetFilenames.get(i));
-//					tmpStream = new FileInputStream("/mnt/extSdCard/Content/Images/" + _imageset + "/" + _imagesetFilenames.get(i));
-					tmpStream = new FileInputStream("/mnt/sdcard/Kenwood/Content/Images/" + _imageset + "/" + _imagesetFilenames.get(i));
+					System.out.println("loading .." + _imagesetFilenameList.get(i));
+//					tmpStream = new FileInputStream("/mnt/extSdCard/Content/Images/" + _imagesetName + "/" + _imagesetFilenameList.get(i));
+					tmpStream = new FileInputStream("/mnt/sdcard/Kenwood/Content/Images/" + _imagesetName + "/" + _imagesetFilenameList.get(i));
 				} catch (IOException e) {
 					e.printStackTrace();
 				}
@@ -495,12 +504,16 @@ public class Product3DOnView extends View {
 				float scale = 0.99f;
 				_scaleImageReading = scale;
 
-				Matrix scaleMatrix = new Matrix();
-				scaleMatrix.postScale(scale, scale);
+				//Matrix scaleMatrix = new Matrix();
+				//scaleMatrix.postScale(scale, scale);
 
-				_imagesetBitmaps[i] = Bitmap.createBitmap(orgbmp, 0, 0, _bmpWidth, _bmpHeight, scaleMatrix, false);
+				//_imagesetBitmaps[i] = Bitmap.createBitmap(orgbmp, 0, 0, _bmpWidth, _bmpHeight, scaleMatrix, false);
+                //Note that: The new bitmap may be the same object as source, or a copy may have been made.
+                // It is initialized with the same density as the original bitmap
+//                _imagesetBitmaps[i] = Bitmap.createBitmap(orgbmp, 0, 0, _bmpWidth-1, _bmpHeight-1);
+                _imagesetBitmaps[i] = orgbmp;
 				_ifLoadedImages[i] = true;
-				orgbmp.recycle();
+				//orgbmp.recycle();
 
 				publishProgress(i + 1);
 
@@ -567,11 +580,26 @@ public class Product3DOnView extends View {
 
 		System.out.println("checking imagesetbitmap size" + _numImgs);
 
+        if(_imagesetBitmaps[_curShowingImage % _numImgs] == null )
+            return true;
+
 		int startX = _parentWidth / 2 - _imagesetBitmaps[0].getWidth() / 2;
 		int startY = _parentHeight / 2 - _imagesetBitmaps[0].getHeight() / 2;
 
 		switch (event.getAction()) {
 			case MotionEvent.ACTION_DOWN:
+
+                System.out.println("Chosen callout: " + _chosenCalloutIndex);
+                //if there is callout showing and click is inside the click-to-zoom-in region, then zoom in and return
+                if (X >= _parentWidth - 200 && X <= _parentWidth && Y >=0 && Y <=200 &&  _chosenCalloutIndex >= 0){
+                    System.out.println("Zoom in is triggered");
+                    LoadZoomInTask zoomInTask= new LoadZoomInTask();
+                    zoomInTask.execute(_chosenCalloutIndex);
+                    return true;
+                }
+
+
+
 				float minDist = Float.MAX_VALUE;
 				float tmpDist;
 				_chosenCalloutIndex = -1;
@@ -600,7 +628,7 @@ public class Product3DOnView extends View {
 				break;
 			case MotionEvent.ACTION_MOVE:
 				Log.i("touchevent", "action move");
-				_chosenCalloutIndex = -1;
+				//_chosenCalloutIndex = -1;
 
 //			if (!_ifBlockingMouseMove) {
 //
