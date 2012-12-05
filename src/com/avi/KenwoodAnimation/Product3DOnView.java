@@ -15,6 +15,7 @@ import android.database.sqlite.SQLiteDatabase;
 import android.graphics.*;
 import android.graphics.drawable.GradientDrawable;
 import android.os.AsyncTask;
+import android.os.Build;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.util.Pair;
@@ -355,8 +356,13 @@ public class Product3DOnView extends View {
             /*canvas.drawRect(startX, startY, startX+_bmpWidth, startY+_bmpHeight, _paint);
             canvas.drawLine(_parentWidth/2, 0, _parentWidth/2, _parentHeight, _paint);
             canvas.drawLine(0, _parentHeight/2, _parentWidth, _parentHeight/2, _paint);*/
-            canvas.drawRect(0, 0, _parentWidth, _parentHeight, _paint);
+            //canvas.drawRect(0, 0, _parentWidth, _parentHeight, _paint);
+            canvas.drawLine(_parentWidth/2, 0, _parentWidth/2, _parentHeight, _paint);
+            canvas.drawLine(0, _parentHeight/2, _parentWidth, _parentHeight/2, _paint);
 
+            System.out.println("chekcking parent width/height");
+            canvas.drawRect((1-1/_scaleFactor)*_parentWidth/2.0f, (1-1/_scaleFactor)*canvas.getHeight()/2.0f, (1-1/_scaleFactor)*_parentWidth/2.0f + _parentWidth/_scaleFactor, (1-1/_scaleFactor)*canvas.getHeight()/2.0f + canvas.getHeight()/_scaleFactor, _paint);
+            canvas.drawRect(_parentWidth/2.0f - 100/_scaleFactor, _parentHeight/2.0f - 100/_scaleFactor, _parentWidth/2.0f - 100/_scaleFactor + 200/_scaleFactor, _parentHeight/2.0f - 100/_scaleFactor + 200/_scaleFactor, _paint );
             //callout text
 			_paint.setTextSize(15 / _scaleFactor);
 			_paint.setAntiAlias(true);
@@ -381,7 +387,7 @@ public class Product3DOnView extends View {
 				float maxHeight = 0;
 
 				for (int i = 0; i < textLines.length; i++) {
-					_paint.getTextBounds(textLines[i], 0, textLines[i].length(), tmpbounds);
+					_paint.getTextBounds(textLines[i]+"nnn", 0, textLines[i].length() + 3, tmpbounds);
 					maxWidth = Math.max(maxWidth, tmpbounds.width());
                     maxHeight += tmpbounds.height();
 					//maxHeight += -_paint.ascent() + _paint.descent();
@@ -407,7 +413,8 @@ public class Product3DOnView extends View {
 
                 for (int i = 0; i < textLines.length; i++) {
 					canvas.drawText(textLines[i], (float) (_parentWidth - maxWidth - (1-1/_scaleFactor)*_parentWidth/2.0f),
-							(float) (10 + (-_paint.ascent() + _paint.descent() + 2 / _scaleFactor) * i + (_scaleFactor - 0.8) * _parentHeight / 2.0f), _paint);
+							(float) ((-_paint.ascent() + _paint.descent() + 2/_scaleFactor)* (i+2)  + (1 - 1/(_scaleFactor+1)) * _parentHeight / 2.0f), _paint);
+							//(float) ((-_paint.ascent() + _paint.descent() + 2/_scaleFactor - 2/_scaleFactor)* (i+2)  + (1 - 1/_scaleFactor) * _parentHeight / 2.0f), _paint);
 				}
 
 
